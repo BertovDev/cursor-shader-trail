@@ -44,28 +44,20 @@ function Sketch() {
     // filterToText
     u.filterToText.value = 1
 
-    // ink
+    // ink — amount / scale / speed / grain all come from the `letters` dials
     u.inkEnabled.value = 1
     u.warpStrength.value = 0.5
-    u.noiseScale.value = 3.6
-    u.noiseSpeed.value = 0
 
     // threshold
     u.thresholdEnabled.value = 0
     u.threshold.value = 0.91
     u.softness.value = 0.36
-    u.thresholdNoise.value = 0.46
 
     // blur
     u.blurEnabled.value = 0
     u.blurStrength.value = 0.04
     u.blurAngle.value = 0
     u.blurSamples.value = 12
-
-    // grain
-    u.grainEnabled.value = 0
-    u.grainIntensity.value = 0.08
-    u.grainScale.value = 8
 
     // dither
     u.ditherEnabled.value = 0
@@ -98,6 +90,17 @@ function Sketch() {
     palette: {
       textColor: "#282828",
       bgColor: "#BCBDB8",
+    },
+    letters: {
+      // 0 = flat ink, 1 = the full noisy treatment
+      noiseAmount: [1, 0, 1],
+      noiseScale: [3.6, 0.2, 20],
+      noiseSpeed: [0, 0, 2],
+      // per-pixel hash jitter on top of the noise
+      grain: [0.46, 0, 1],
+      filmGrain: false,
+      filmGrainAmount: [0.08, 0, 0.5],
+      filmGrainScale: [8, 1, 40],
     },
     trail: {
       enabled: true,
@@ -146,6 +149,15 @@ function Sketch() {
   applyHex(uniforms.midColor, params.palette.textColor)
   applyHex(uniforms.edgeColor, params.palette.textColor)
   applyHex(uniforms.bgColor, params.palette.bgColor)
+
+  // Sync letter dials → shader uniforms each render
+  uniforms.inkNoiseAmount.value = params.letters.noiseAmount
+  uniforms.noiseScale.value = params.letters.noiseScale
+  uniforms.noiseSpeed.value = params.letters.noiseSpeed
+  uniforms.thresholdNoise.value = params.letters.grain
+  uniforms.grainEnabled.value = params.letters.filmGrain ? 1 : 0
+  uniforms.grainIntensity.value = params.letters.filmGrainAmount
+  uniforms.grainScale.value = params.letters.filmGrainScale
 
   // Sync trail dials → shader uniforms each render
   uniforms.trailEnabled.value = params.trail.enabled ? 1 : 0

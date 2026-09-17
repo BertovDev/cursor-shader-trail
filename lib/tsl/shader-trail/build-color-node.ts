@@ -67,6 +67,7 @@ export type ColorNodeUniforms = {
   threshold: ScalarUniform
   softness: ScalarUniform
   thresholdNoise: ScalarUniform
+  inkNoiseAmount: ScalarUniform
   blurStrength: ScalarUniform
   blurAngle: ScalarUniform
   blurSamples: ScalarUniform
@@ -121,6 +122,7 @@ export function createColorNodeUniforms(): ColorNodeUniforms {
     threshold: uniform(0.54),
     softness: uniform(0.01),
     thresholdNoise: uniform(0.08),
+    inkNoiseAmount: uniform(1),
     blurStrength: uniform(0.044),
     blurAngle: uniform(0),
     blurSamples: uniform(12),
@@ -291,10 +293,15 @@ export function buildColorNode(
     const hi = u.threshold.add(u.softness)
     const inkThresholded = smoothstep(lo, hi, tField)
     const inkRaw = clamp(tField, 0, 1)
-    const ink = mix(inkRaw, inkThresholded, u.thresholdEnabled)
+    const inkShaded = mix(inkRaw, inkThresholded, u.thresholdEnabled)
+    // `inkNoiseAmount` fades the whole letter treatment out. At 0 the ink is a
+    // flat fill; at 1 the noise and jitter are at full strength. Turning
+    // `inkEnabled` off instead would fall through to the raw source sample,
+    // which is the white-on-black mask, not what anyone wants to see.
+    const ink = mix(float(1), inkShaded, u.inkNoiseAmount)
 
     // ── 3-stop ink gradient (edge → mid → core), optionally overlaid
-    const tFade = clamp(tField, 0, 1)
+    const tFade = mix(float(1), clamp(tField, 0, 1), u.inkNoiseAmount)
     const stop1 = smoothstep(0.0, 0.5, tFade)
     const stop2 = smoothstep(0.5, 1.0, tFade)
     const inkBody = mix(mix(u.edgeColor, u.midColor, stop1), u.coreColor, stop2)
