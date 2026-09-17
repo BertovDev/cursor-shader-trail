@@ -1,0 +1,35 @@
+@import "tailwindcss";
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #bcbdb8;
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: var(--alte-haas), ui-sans-serif, system-ui, sans-serif;
+}
+
+canvas {
+  display: block;
+  touch-action: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

@@ -1,0 +1,32 @@
+{
+  "name": "cursor-shader-trail",
+  "version": "1.0.0",
+  "private": false,
+  "license": "MIT",
+  "description": "A cursor trail where the brush is a pluggable function. Three.js, WebGPU and TSL.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "dialkit": "^1.2.0",
+    "next": "16.1.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "tailwind-merge": "^3.4.0",
+    "three": "^0.182.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "@types/node": "^20.19.30",
+    "@types/react": "^19.2.9",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.182.0",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3"
+  }
+}
