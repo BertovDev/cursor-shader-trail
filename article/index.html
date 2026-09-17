@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cursor Shader Trail</title>
+</head>
+<body>
+
+<!-- Title: With what we will have fun today? -->
+
+<figure>
+  <video src="assets/00-hero.mp4" poster="assets/00-hero.jpg" autoplay loop muted playsinline controls></video>
+</figure>
+
+<h2>The Idea</h2>
+
+<p>Do you want to level up your site’s interaction with only ten lines of code?</p>
+
+<p>I love interactions on websites, and cursor trails are my favorite. They lift a site using the simplest and most-used interaction there is: the cursor. And you can apply one to anything on the page. 2D, 3D, an image, text, whatever you want.</p>
+
+<p>But most trails I see nowadays are just a radial blob pushing pixels out of a circle. Simple, and repetitive.</p>
+
+<p>What I want to bring to the table isn’t only a technique. It’s the intention behind it: combining what you learn from different places to reach a solution nobody else would. Mix maths and economics and you end up somewhere new. Here we mix custom shapes into a cursor trail.</p>
+
+<p>Following that idea, we’ll focus on two parts:</p>
+
+<ul>
+  <li>A <strong>grid</strong> that works as the memory of your cursor, remembering where it has been and how fast it was moving.</li>
+  <li>A <strong>shader</strong> that reads the grid and decides what to draw. It can be any shader you write, so you can bring your own ideas into the technique.</li>
+</ul>
+
+<p>The brush that stamps into that grid is the ten lines. Swap them and the whole mark changes.</p>
+
+<p>Get ready to build with the beautiful Three.js and the modern WebGPU renderer with TSL. I also really recommend a visit to phobon’s great fragments-boilerplate, where you’ll find more techniques like this one.</p>
+
+<h2>What we will create and use</h2>
+
+<ul>
+  <li>A 200x200 float texture for our cursor to write into every frame</li>
+  <li>A custom function that changes the shape of your cursor</li>
+  <li>A source texture, in this case a word, used as a mask</li>
+  <li>A TSL graph that warps the UV, inks the letters, and colors the trail by speed</li>
+</ul>
+
+<p>Built with React Three Fiber, Three.js, drei and WebGPU.</p>
+
+<h2>Setting up the scene</h2>
+
+<p>Let’s start with the simple part: a scene running on the modern WebGPU renderer.</p>
+
+<p><code>WebGPURenderer</code> initialises asynchronously. R3F’s <code>&lt;Canvas gl={...}&gt;</code> accepts an async factory, but the frameloop starts right away, so the first frames render against a renderer that isn’t ready yet. The fix is two lines: start at <code>frameloop=&quot;never&quot;</code> and flip to <code>&quot;always&quot;</code> once <code>init()</code> resolves.</p>
+
+<pre><code class="language-jsx">const [frameloop, setFrameloop] = useState(&quot;never&quot;)
+
+&lt;Canvas
+  frameloop={frameloop}
+  orthographic
+  camera={{ position: [0, 0, 1] }}
+  gl={async (props) =&gt; {
+    const renderer = new WebGPURenderer(props)
+    await renderer.init()
+    setFrameloop(&quot;always&quot;)
+    return renderer
+  }}
+&gt;
+  &lt;Sketch /&gt;
+&lt;/Canvas&gt;</code></pre>
+
+<p>An orthographic camera and a single fullscreen quad. We’re writing a fragment shader, not building a 3D scene, so there’s nothing else in here.</p>
+
+<h2>The Trail Field</h2>
+
+<p>To build this we’ll use a <code>DataTexture</code>. It lets you create a texture from a custom buffer of array data, which means we can build a grid of positions and store any value we want inside it.</p>
+
+<pre><code class="language-jsx">const data = new Float32Array(4 * grid * grid)
+const texture = new THREE.DataTexture(
+  data, grid, grid, THREE.RGBAFormat, THREE.FloatType
+)
+texture.minFilter = texture.magFilter = THREE.NearestFilter</code></pre>
+
+<p><code>NearestFilter</code> gives us that grid, pixelated look, since it picks the color of the nearest cell instead of blending between them.</p>
+
+<p>Four float channels, RGBA, and we can use each one for whatever we want to create. This is why I like to use a <code>DataTexture</code> for velocity-driven interactions:</p>
+
+<ul>
+  <li><strong>R / G</strong> — the flow, basically the trail itself. Both store the <em>negated</em> travel direction, which makes the image look dragged along with the cursor instead of pushed away from it. Pushed feels wrong as soon as you see it.</li>
+  <li><strong>B</strong> — speed.</li>
+  <li><strong>A</strong> — spare.</li>
+</ul>
+
+<figure>
+  <video src="assets/01-trail-field-raw.mp4" poster="assets/01-trail-field-raw.jpg" autoplay loop muted playsinline controls></video>
+  <figcaption>The field itself, drawn straight to the screen. Red is R, the flow along x. Green is G, the flow along y. Yellow is both at once. Nothing else is rendered here.</figcaption>
+</figure>
+
+<h3>Tracking the pointer</h3>
+
+<p>Good news: React Three Fiber already tracks the cursor for us.</p>
+
+<p><code>state.pointer</code> comes in normalized device coordinates: -1 to 1 on both axes, with the origin in the center of the canvas. The useful part is that its Y points <em>up</em>, same as our texture. DOM coordinates point down, so tracking the pointer by hand means flipping it yourself. R3F already did that for us.</p>
+
+<pre><code class="language-jsx">const { pointer } = state
+const x = (pointer.x + 1) * 0.5
+const y = (pointer.y + 1) * 0.5</code></pre>
+
+<p>The only thing we add is a <code>pointerleave</code> handler, so leaving the canvas on one side and coming back on the other doesn’t read as one huge movement.</p>
+
+<h3>Filling the grid</h3>
+
+<p>Now the interesting part. How do we write into that buffer?</p>
+
+<p>A <code>Float32Array</code> is flat. So basically we are just filling a list of numbers. Cell <code>(x, y)</code> starts at <code>4 <em> (x + grid </em> y)</code>, and R, G, B, A sit right after it.</p>
+
+<figure>
+  <video src="assets/02-flat-array-indexing.mp4" poster="assets/02-flat-array-indexing.jpg" autoplay loop muted playsinline controls></video>
+  <figcaption>The grid is a fiction. The array is one flat list, and <code>4 * (x + grid * y)</code> is how we address a cell in it.</figcaption>
+</figure>
+
+<p>We also need to know how fast the cursor is going, which we get by comparing this frame’s position against the last one. Per frame, not per event, so it stays in sync with the render loop.</p>
+
+<pre><code class="language-jsx">const vx = (x - prev.x) * grid
+const vy = (y - prev.y) * grid
+const speed = Math.hypot(vx, vy)
+
+const centerX = x * grid
+const centerY = y * grid</code></pre>
+
+<p>Then we visit the cells around the cursor, measure how far each one is from the center, fade it out with distance, and write our three values in:</p>
+
+<pre><code class="language-jsx">for (let cx = x0; cx &lt;= x1; cx++) {
+  for (let cy = y0; cy &lt;= y1; cy++) {
+    const dist = Math.hypot(cx + 0.5 - centerX, cy + 0.5 - centerY)
+    if (dist &gt;= brushRadius) continue
+
+    const force = (1 - dist / brushRadius) ** falloff
+    const magnitude = strength * force * speed
+
+    const i = 4 * (cx + grid * cy)
+    data[i]     += magnitude * (-vx / speed)            // R
+    data[i + 1] += magnitude * (-vy / speed)            // G
+    data[i + 2]  = Math.min(1, data[i + 2] + magnitude) // B, clamped
+  }
+}</code></pre>
+
+<p><code>x0</code> and <code>x1</code> just bound the loop to the cells the brush can reach, so a bigger grid doesn’t cost us anything.</p>
+
+<p>That <code>Math.min</code> matters more than it looks. Without it, scrubbing slowly in one spot keeps adding forever and the whole area blows out to white.</p>
+
+<figure>
+  <video src="assets/03-v6-engraving.mp4" poster="assets/03-v6-engraving.jpg" autoplay loop muted playsinline controls></video>
+  <figcaption>The deposit loop, running. Each square is one cell; its brightness is <code>force</code>. The dashed box is the only region we visit.</figcaption>
+</figure>
+
+<p>And notice that <code>force</code> is the only thing deciding the <em>shape</em> of the mark. Right now it’s a plain circular fade. Watch what happens if we replace it with ten lines that draw diagonal stripes instead:</p>
+
+<pre><code class="language-jsx">const circle = () =&gt; 1</code></pre>
+
+<p>That’s the default brush. It returns 1 everywhere, so the envelope does all the shaping and we get the round blob every cursor trail starts from.</p>
+
+<h3>Decay</h3>
+
+<p>I love decays. They make things feel natural and smooth, closer to how things behave in the real world. Basically we use time to raise or lower a value, and that is what takes a cursor trail from working to feeling right. Every cell dies off from 1 down to 0.</p>
+
+<pre><code class="language-jsx">const k = decay ** (delta * 60)
+for (let i = 0; i &lt; data.length; i += 4) {
+  data[i] *= k; data[i + 1] *= k; data[i + 2] *= k
+}</code></pre>
+
+<p>Notice the <code>delta</code>. A flat multiply runs once per frame, so the trail would fade twice as fast on a 120Hz screen as on a 60Hz one. The exponent locks the fade to real time instead of to the refresh rate.</p>
+
+<figure>
+  <img src="assets/04-v3-filmstrip.png" alt="">
+  <figcaption>Five moments from one stroke, and what a single cell actually holds once the cursor has passed over it.</figcaption>
+</figure>
+
+<h3>Combining them</h3>
+
+<p>It all runs inside one <code>useFrame</code>. Fade first, then deposit, so the stroke you’re drawing right now lands at full strength:</p>
+
+<pre><code class="language-jsx">useFrame((state, delta) =&gt; {
+  fade(data, delta)
+  deposit(data, state.pointer)
+  texture.needsUpdate = true
+})</code></pre>
+
+<p>That last line is the one everybody forgets. We changed a plain JavaScript array and three.js has no idea. <code>needsUpdate</code> tells it to re-upload the buffer for this frame.</p>
+
+<h2>The source texture</h2>
+
+<p>We have a cursor writing into a grid. Now we need something for it to push around.</p>
+
+<p>Anything you can rasterize works here: an image, an SVG, a video frame. I’m using plain text in this case.</p>
+
+<figure>
+  <video src="assets/05-source-texture.mp4" poster="assets/05-source-texture.jpg" autoplay loop muted playsinline controls></video>
+  <figcaption>Typing repaints the offscreen canvas, the texture re-uploads, and the mask changes with it. Nothing is warped yet, and this still frame is also what a reader gets with reduced motion on.</figcaption>
+</figure>
+
+<p>The text goes onto an offscreen 2D canvas and becomes a <code>CanvasTexture</code>. White on black, because we’re not drawing it directly. We’re building a mask, and <code>luminance()</code> collapses each pixel down to a single value between 0 and 1.</p>
+
+<p>Black gives us 0, white gives us 1, and we blend between two colors of our own with it. I’m calling them <code>paper</code> and <code>ink</code>, since the look I’m after is closer to print than to screen.</p>
+
+<pre><code class="language-jsx">const source = texture(sourceTex, uv()).rgb
+return mix(paper, ink, luminance(source))</code></pre>
+
+<h2>Connecting the grid to a shader</h2>
+
+<p>Now to the fun part. That <code>DataTexture</code> we’ve been filling? We hand the exact same object to the shader. The CPU writes it every frame, <code>needsUpdate</code> uploads it, and the shader reads fresh data on the next draw. That’s the whole connection.</p>
+
+<figure>
+  <video src="assets/06-write-and-read.mp4" poster="assets/06-write-and-read.jpg" autoplay loop muted playsinline controls></video>
+  <figcaption>One object, two rates. JavaScript writes it once per frame; the shader reads it once per fragment.</figcaption>
+</figure>
+
+<h3>Reading the flow</h3>
+
+<p>We sample the field at the fragment’s own <code>uv</code>, pull the R and G channels back out as a vector, and offset the UV with it:</p>
+
+<pre><code class="language-jsx">import { texture, uv, mix, Fn, luminance, uniform } from &#x27;three/tsl&#x27;
+import { MeshBasicNodeMaterial } from &#x27;three/webgpu&#x27;
+
+const material = new MeshBasicNodeMaterial()
+const warpStrength = uniform(1.5) // A uniform stays live and can be updated!
+
+material.colorNode = Fn(() =&gt; {
+  // 1. Read the R and G channels from our data texture
+  const flow = texture(trailTex, uv()).rg
+
+  // 2. Distort the original UVs using the flow velocity
+  const warpedUv = uv().add(flow.mul(warpStrength))
+
+  // 3. Read the text mask using the distorted UVs
+  const source = texture(sourceTex, warpedUv).rgb
+  return mix(paper, ink, luminance(source))
+})()</code></pre>
+
+<p>That’s it. Five lines, and the letters drag.</p>
+
+<p>The trick is in the third line. Instead of reading the text at its own position, every fragment reads from wherever the cursor dragged it. Where the field is empty the flow is zero, the UV is untouched, and you get the plain word back. Where the cursor just passed, the flow pushes the read somewhere else and the letters follow.</p>
+
+<figure>
+  <video src="assets/07-uv-warp.mp4" poster="assets/07-uv-warp.jpg" autoplay loop muted playsinline controls></video>
+  <figcaption>Small squares are where each fragment sits. Large squares are where it reads from. They point back along the cursor’s travel, which is what makes the image feel dragged.</figcaption>
+</figure>
+
+<p>One thing: <code>warpStrength</code> has to be a <code>uniform()</code>, not a plain JavaScript number. <code>Fn()</code> builds the graph once, so a number gets baked in as a constant and never changes again. A uniform stays live.</p>
+
+<h3>Smoothing the read</h3>
+
+<p>Run it and the distortion looks blocky. You can see the grid.</p>
+
+<p>That’s <code>NearestFilter</code>. Two hundred cells, no blending, hard edges everywhere.</p>
+
+<p>We could switch to <code>LinearFilter</code> and be done with it. But the grid has to stay sharp. Next section we start drawing patterns into it, and smoothing would wipe them out on the way in.</p>
+
+<p>So we blur on the way out instead:</p>
+
+<pre><code class="language-jsx">const r = blurRadius
+const t = (dx, dy) =&gt; texture(trailTex, uv().add(vec2(dx, dy)))
+
+const field = t(-r, -r).add(t(r, -r)).add(t(-r, r)).add(t(r, r))
+  .add(t(0, -r).mul(2)).add(t(-r, 0).mul(2))
+  .add(t(r, 0).mul(2)).add(t(0, r).mul(2))
+  .add(t(0, 0).mul(4))
+  .div(16)</code></pre>
+
+<p>Nine samples in a 3x3, center weighted heaviest, divided by sixteen. A Gaussian blur. Swap <code>texture(trailTex, uv())</code> for that and the distortion smooths out.</p>
+
+<h2>Creating the brush</h2>
+
+<p>Remember that the shape of the brsuh  is a function, so basically we can write different version of that unction as the brush we want to achieve.</p>
+
+<p>Every brush works the same way:</p>
+
+<pre><code class="language-none">force = envelope × pattern × scale</code></pre>
+
+<p><code>envelope</code> is the radial fade we already wrote, <code>(1 - dist / brushRadius) ** falloff</code>. It gives the brush a soft edge instead of ending in a hard circle. <code>scale</code> is a magnitude fix-up. Neither of them ever changes.</p>
+
+<p><code>pattern</code> is the only part that varies, and it’s a plain function:</p>
+
+<pre><code class="language-jsx">const brush = (lx, ly, params) =&gt; 0..1</code></pre>
+
+<p><code>lx</code> and <code>ly</code> are local coordinates, normalized to the brush radius. <code>(0, 0)</code> is the center and the edges sit at -1 and 1. The function knows nothing about the cursor, the grid, or the shader. At zero the brush skips that point. At one it writes at full strength.</p>
+
+<p><code>circle</code> was the defaiult state of our brush, 1 everywhere so its pure soli. But nothing says a brush has to be solid. Here’s diagonal hatching instead:</p>
+
+<pre><code class="language-jsx">const fract = (x) =&gt; ((x % 1) + 1) % 1
+
+const hatch = (lx, ly, { repeat, thickness }) =&gt; {
+  const diagonal = (lx - ly) * Math.SQRT1_2
+  const stripe = fract(diagonal * repeat)
+  return stripe &gt; thickness ? 1 : 0
+}</code></pre>
+
+<p>Swap it in and nothing else moves:</p>
+
+<pre><code class="language-jsx">const force = envelope * hatch(lx, ly, { repeat: 6, thickness: 0.44 })</code></pre>
+
+<p>Same grid, same cursor, same shader. A completely different mark.</p>
+
+<figure>
+  <video src="assets/08-brush-decomposition.mp4" poster="assets/08-brush-decomposition.jpg" autoplay loop muted playsinline controls></video>
+  <figcaption>The envelope never changes. Only the pattern does.</figcaption>
+</figure>
+
+<h3>Writing your own</h3>
+
+<p>And the great of this is you ca nactually change the brush as whatever shape you want, is like having an inercambialbe tip brush. Also playing with the blur we created earlier, each shape can deliver different outcomes.</p>
+
+<pre><code class="language-jsx">const dots = (lx, ly, { repeat, size }) =&gt; {
+  const cx = fract(lx * repeat) - 0.5
+  const cy = fract(ly * repeat) - 0.5
+  return Math.hypot(cx, cy) &lt;= size ? 1 : 0
+}</code></pre>
+
+<p>Same <code>fract</code> trick, now in two dimensions. We wrap both axes into a repeating grid, subtract a half to put the origin in the middle of each cell, and keep whatever falls inside a circle.</p>
+
+<p>That’s the whole contribution. Pass it in and it picks up the envelope, the scale, the decay and everything downstream for free:</p>
+
+<pre><code class="language-jsx">useTrailField({ brush: dots })</code></pre>
+
+<p>Nothing else changes. Not the grid, not the shader, not the text.</p>
+
+<figure>
+  <video src="assets/09-brush-swap.mp4" poster="assets/09-brush-swap.jpg" autoplay loop muted playsinline controls></video>
+  <figcaption>Six brushes, one drag. The picker is left visible on purpose: nothing changes between these takes except which function gets passed to <code>useTrailField</code>.</figcaption>
+</figure>
+
+<p>And the pattern doesn’t have to be procedural. Load a PNG, read it into an <code>ImageData</code> once, and sample its alpha in the same <code>lx, ly</code> space. Now anything a designer can draw is a brush.</p>
+
+<p>You can also play with the flow direction. Here we follow the cursor’s velocity, but you could for example point it perpendicular to that for a swirl.</p>
+
+<h2>The final touches</h2>
+
+<p>Now lets add some color to our life.</p>
+
+<h3>Coloring by speed</h3>
+
+<p>We’ve only touched R and G so far. B has been holding speed this whole time, and reading it costs us nothing:</p>
+
+<pre><code class="language-jsx">const composed = mix(paper, ink, textMask)
+
+const speed = clamp(field.b, 0, 1)
+const trailColor = ramp3(speed, red, yellow, orange)
+const trail = trailColor.mul(speed).mul(trailIntensity)
+
+return composed.add(trail)</code></pre>
+
+<p><code>ramp3</code> is a small helper, It blends across three colors instead of two:</p>
+
+<pre><code class="language-jsx">const ramp3 = (t, low, mid, high) =&gt; mix(
+  mix(low, mid, smoothstep(0, 0.5, t)),
+  high,
+  smoothstep(0.5, 1, t)
+)</code></pre>
+
+<p>So basically with this function we can manage the colors based on the speed. We pass in the speed value and it returns a color: red if the movement is slow, and if it moves fast it passes through yellow into orange.</p>
+
+<figure>
+  <video src="assets/10-speed-color.mp4" poster="assets/10-speed-color.jpg" autoplay loop muted playsinline controls></video>
+  <figcaption>Slow drags glow red, fast flicks run through yellow into orange. The white core on the quickest strokes is a bloom multiplier layered on top of the ramp, which is one extra line in the demo source.</figcaption>
+</figure>
+
+<p>Finally we can apply a mask to the text, so instead of painting everywhere the trail smoothly disappears when we move outside the letters.</p>
+
+<figure>
+  <video src="assets/11-mask-to-text.mp4" poster="assets/11-mask-to-text.jpg" autoplay loop muted playsinline controls></video>
+  <figcaption>The same stroke, both ways. On <em>everywhere</em> the trail spills across the paper. On <em>masked</em> it can only appear inside the letters, and the type stops being a backdrop.</figcaption>
+</figure>
+
+<pre><code class="language-jsx">const fxMask = mix(float(1), textMask, filterToText)
+const trail = trailColor.mul(speed).mul(trailIntensity).mul(fxMask)
+</code></pre>
+
+<p>All together and we have a unique cursor trail. One thing I really do recommend when developing and creating new things is to use value panels to tweak the values of what you are creating, until you get the desired result.</p>
+
+<p>It’s all about iteration. Create, iterate, mix it with other things you have created, iterate again, and you will end up creating new things that you can love and share.</p>
+
+</body>
+</html>
