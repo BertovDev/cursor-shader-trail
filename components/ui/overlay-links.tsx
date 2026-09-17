@@ -19,7 +19,7 @@ const SOCIALS = [
 ] as const
 
 const chip =
-  "inline-flex size-11 items-center justify-center rounded-full border border-black/15 bg-white/60 text-black/60 backdrop-blur transition-colors hover:bg-white hover:text-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+  "inline-flex size-11 items-center justify-center rounded-full text-black/55 transition-colors hover:text-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
 
 export function OverlayLinks() {
   return (
