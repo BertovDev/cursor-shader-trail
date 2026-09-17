@@ -16,11 +16,7 @@ bun install
 bun dev
 ```
 
-- `/` — the finished effect, with a live control panel
-- `/tutorial` — the same effect built in nine steps
-
-On the tutorial page: `←` `→` move between steps, `H` hides the overlay, and
-the input at the bottom right changes the word.
+Open `http://localhost:3000`. The control panel is in the top right.
 
 ## How it works
 
@@ -56,28 +52,22 @@ const dots = (lx, ly, { repeat, size }) => {
 useTrailField({ brush: dots })
 ```
 
-Six brushes ship in `lib/tsl/tutorial/brushes.ts`. Writing a seventh is five
-lines, and nothing downstream changes.
+Six brush shapes ship with the demo, switchable from the control panel.
+Writing a seventh is five lines, and nothing downstream changes.
 
 ## Layout
 
 ```
-app/
-  page.tsx                   the finished effect
-  tutorial/page.tsx          the nine-step walkthrough
+app/page.tsx                 the effect
 components/
-  shader-trail/              the finished effect
-  tutorial/steps/            one file per step, each the previous plus one idea
+  shader-trail/              the experience and its control panel
   webgpu/                    renderer boot and the fullscreen quad
 lib/tsl/
-  tutorial/brushes.ts        the BrushFn registry
-  tutorial/use-trail-field.ts the CPU simulation
-  tutorial/nodes.ts          shared TSL fragments
-  shader-trail/              the full pipeline behind the finished effect
+  interactivity/             the CPU trail simulation
+  shader-trail/              the TSL pipeline: warp, ink, trail colour, mask
+  noise/                     simplex noise, transpiled to TSL
+article/                     the tutorial text and its media, for the CMS
 ```
-
-The step files deliberately repeat each other. Diff step N against N-1 and you
-see exactly one change.
 
 ## Credits
 
