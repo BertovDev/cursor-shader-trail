@@ -1,6 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
+import { OverlayLinks } from "@/components/ui/overlay-links"
 
 const ShaderTrailExperience = dynamic(
   () => import("@/components/shader-trail/shader-trail-experience"),
@@ -8,5 +9,10 @@ const ShaderTrailExperience = dynamic(
 )
 
 export default function Page() {
-  return <ShaderTrailExperience />
+  return (
+    <>
+      <ShaderTrailExperience />
+      <OverlayLinks />
+    </>
+  )
 }
