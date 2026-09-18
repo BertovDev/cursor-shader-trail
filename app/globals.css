@@ -9,8 +9,22 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: #bcbdb8;
+  height: 100%;
+  overflow: hidden;
   overscroll-behavior: none;
+}
+
+/* The still life sits behind everything and never scrolls or tiles. It is a
+   1500px halftone, so it gets upscaled on most displays — `pixelated` keeps
+   the dither pattern as dots instead of letting the browser smear them. */
+body {
+  background-color: #0a0908;
+  background-image: url("/bg2.png");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  image-rendering: pixelated;
 }
 
 body {

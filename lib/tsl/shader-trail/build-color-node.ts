@@ -100,6 +100,8 @@ export type ColorNodeUniforms = {
   vignetteEnabled: ScalarUniform
   trailEnabled: ScalarUniform
   filterToText: ScalarUniform
+  introReveal: ScalarUniform
+  introBlur: ScalarUniform
   coreColor: Vec3Uniform
   midColor: Vec3Uniform
   edgeColor: Vec3Uniform
@@ -135,6 +137,8 @@ export function createColorNodeUniforms(): ColorNodeUniforms {
     textAspectBY: uniform(1.0),
     imageMix: uniform(0),
     sourceScale: uniform(1.0),
+    introReveal: uniform(1),
+    introBlur: uniform(0.02),
     ditherOpacity: uniform(0.17),
     ditherPixelSize: uniform(2),
     ditherSpread: uniform(0.44),
@@ -236,8 +240,18 @@ export function buildColorNode(
       centered.x.mul(u.textAspect),
       centered.y.mul(u.textAspectY)
     ).add(0.5)
-    const sourceSampleA = texture(sourceTex, textUv)
-    const sourceColorA = sourceSampleA.rgb
+    // Letters resolve out of a blur as the reveal passes. The radius is tied
+    // to the remaining progress, so it collapses to zero — and the five taps
+    // to a single sharp one — exactly when the intro lands.
+    const introBlurRadius = u.introBlur.mul(float(1).sub(u.introReveal)).max(0)
+    const tapAt = (ox: number, oy: number) =>
+      texture(sourceTex, textUv.add(vec2(ox, oy).mul(introBlurRadius))).rgb
+    const sourceColorA = tapAt(0, 0)
+      .add(tapAt(1, 1))
+      .add(tapAt(-1, 1))
+      .add(tapAt(1, -1))
+      .add(tapAt(-1, -1))
+      .div(5)
     const sourceColor = sourceTexB
       ? (() => {
           // Scratch-card: sample B at the clean (unwarped) UV so the revealed
@@ -254,7 +268,7 @@ export function buildColorNode(
           return mix(sourceColorA, sourceSampleB.rgb, mixFactor)
         })()
       : sourceColorA
-    const textMask = sourceColor.dot(vec3(0.299, 0.587, 0.114))
+    const textMaskRaw = sourceColor.dot(vec3(0.299, 0.587, 0.114))
 
     // ── Directional smear ("Progressive Blur") of the noise field
     const dirX = cos(u.blurAngle)
@@ -280,6 +294,13 @@ export function buildColorNode(
       .add(1)
       .mul(0.5)
     const noiseBlurred = mix(noiseCentre, noiseBlurredOn, u.blurEnabled)
+
+    // ── Intro reveal: a plain fade of the letterforms. `introReveal` walks
+    // 0 to 1 on load and sits at 1 afterwards, so this costs nothing once the
+    // animation has landed.
+    const introMask = clamp(u.introReveal, 0, 1)
+    const textMask = textMaskRaw.mul(introMask)
+
 
     // ── Threshold with per-fragment hash jitter
     const jitterSeed = _uv.add(vec2(time.mul(0.013), time.mul(0.017)))

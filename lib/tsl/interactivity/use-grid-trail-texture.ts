@@ -48,6 +48,14 @@ export type UseGridTrailTextureProps = {
    * field.
    */
   filter?: TrailFilter;
+  /**
+   * Drives the field from somewhere other than the mouse. While `.current`
+   * is non-null it replaces the pointer, in the same [0, 2] space (0 = left
+   * / top). A ref rather than a prop so a caller can move it every frame
+   * without re-rendering. Used by the intro sweep, which needs the real
+   * brush, decay and filtering rather than a shader approximation.
+   */
+  pointerOverrideRef?: { current: { x: number; y: number } | null };
 };
 
 /**
@@ -82,6 +90,7 @@ export const useGridTrailTexture = (
     patternThickness = 0.1,
     patternWidth = 0.98,
     filter = "nearest",
+  pointerOverrideRef,
   } = options || {};
 
   const liveRef = useRef({
@@ -225,7 +234,7 @@ export const useGridTrailTexture = (
     const patternThickness = liveRef.current.patternThickness;
     const patternWidth = liveRef.current.patternWidth;
 
-    const rawPointer = rawPointerRef.current;
+    const rawPointer = pointerOverrideRef?.current ?? rawPointerRef.current;
     if (!rawPointer) {
       const data = dt.image.data as Float32Array;
       for (let i = 0; i < data.length; i += 4) {

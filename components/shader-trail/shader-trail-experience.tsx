@@ -1,9 +1,10 @@
 // @ts-nocheck
 "use client"
 
+import { useFrame } from "@react-three/fiber"
 import { DialRoot, useDialKit } from "dialkit"
 import "dialkit/styles.css"
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { WebGPUScene } from "@/components/webgpu/webgpu-scene"
 import { WebGPUSketch } from "@/components/webgpu/webgpu-sketch"
 import { alteHaas } from "@/lib/fonts"
@@ -77,6 +78,9 @@ function Sketch() {
     return u
   }, [])
 
+  // Declared ahead of the panel so the Replay action can reset it.
+  const introT = useRef(0)
+
   const params = useDialKit("Shader Text", {
     text: {
       value: {
@@ -86,6 +90,20 @@ function Sketch() {
       },
       fontSize: [0.24, 0.05, 0.6],
       letterSpacing: [-0.12, -0.3, 0.3],
+      // Longer text wraps onto this many lines before it shrinks to fit.
+      maxLines: [2, 1, 3, 1],
+    },
+    intro: {
+      enabled: true,
+      replay: { type: "action", label: "Replay" },
+      duration: [1.4, 0.2, 8],
+      // How far the letters start out of focus. Collapses to sharp on land.
+      blur: [0.01, 0, 0.12],
+      // The virtual cursor's path while the intro runs. Direction is in
+      // degrees — 0 is left to right, 90 is bottom to top — and wave is how
+      // far it swings across that line.
+      direction: [15, 0, 360, 15],
+      wave: [0.2, 0, 1],
     },
     palette: {
       textColor: "#282828",
@@ -94,7 +112,7 @@ function Sketch() {
     letters: {
       // 0 = flat ink, 1 = the full noisy treatment
       noiseAmount: [1, 0, 1],
-      noiseScale: [3.6, 0.2, 20],
+      noiseScale: [3, 0.2, 20],
       noiseSpeed: [0, 0, 2],
       // per-pixel hash jitter on top of the noise
       grain: [0.46, 0, 1],
@@ -128,9 +146,9 @@ function Sketch() {
         default: "nearest",
         options: ["nearest", "linear"],
       },
-      grid: [200, 32, 400],
+      grid: [202, 32, 400],
       radius: [0.05, 0.001, 0.5],
-      strength: [0.71, 0, 3],
+      strength: [0.7, 0, 3],
       decay: [0.97, 0, 1],
       influenceGain: [0.3, 0, 3],
       influenceGamma: [0.9, 0.1, 3],
@@ -141,6 +159,11 @@ function Sketch() {
       patternSize: [0.25, 0, 1],
       patternThickness: [0.1, 0, 1],
       patternWidth: [0.92, 0, 1],
+    },
+  },
+  {
+    onAction: (action) => {
+      if (action.endsWith("replay")) introT.current = 0
     },
   })
 
@@ -167,7 +190,65 @@ function Sketch() {
   applyHex(uniforms.trailColorMid, params.trail.colorMid)
   applyHex(uniforms.trailColorHigh, params.trail.colorHigh)
 
+  // ── Intro reveal. Driven off useFrame rather than a timer so it starts on
+  // the first rendered frame — the canvas sits at frameloop "never" until the
+  // WebGPU renderer finishes its async init, and a timer would burn most of
+  // the animation against a blank canvas.
+  // Retyping replays it, as does the panel's Replay button.
+  useEffect(() => {
+    introT.current = 0
+  }, [params.text.value])
+
+  // While the intro runs this stands in for the mouse, so the trail comes
+  // from the real field — same brush, grid, decay and colour ramp as hovering.
+  // Cleared on the last frame, which hands control straight back to the
+  // pointer. Note this useFrame is registered before useGridTrailTexture's,
+  // so the override is always in place before the field reads it.
+  const introPointer = useRef<{ x: number; y: number } | null>(null)
+
+  useFrame((_, delta) => {
+    if (!params.intro.enabled) {
+      introPointer.current = null
+      uniforms.introReveal.value = 1
+      return
+    }
+    if (introT.current >= 1) {
+      introPointer.current = null
+      uniforms.introReveal.value = 1
+      return
+    }
+    const d = Math.max(params.intro.duration, 0.0001)
+    introT.current = Math.min(1, introT.current + delta / d)
+    const p = introT.current
+
+    // The fade and the cursor want different curves. smoothstep spreads the
+    // opacity evenly across the whole duration — easeOutCubic put it at 0.9
+    // by the halfway point, which read as a flash rather than a fade.
+    uniforms.introReveal.value = p * p * (3 - 2 * p)
+
+    // The cursor keeps easeOutCubic, so it still leaves fast and settles.
+    const t = 1 - (1 - p) ** 3
+
+    // Walk the cursor across the canvas along `direction`, swinging along
+    // the perpendicular. The letters fade in underneath it, so the trail is
+    // what gives the intro its movement.
+    const rad = (params.intro.direction * Math.PI) / 180
+    const dirX = Math.cos(rad)
+    const dirY = Math.sin(rad)
+    const span = Math.abs(dirX) + Math.abs(dirY)
+    const swing = Math.sin(t * Math.PI * 2) * params.intro.wave * 0.5
+
+    // UV space: x right, y up.
+    const uvX = 0.5 + dirX * (t - 0.5) * span - dirY * swing
+    const uvY = 0.5 + dirY * (t - 0.5) * span + dirX * swing
+
+    // Pointer space is [0, 2] with 0 at the left/top edge, so y flips.
+    introPointer.current = { x: uvX * 2, y: (1 - uvY) * 2 }
+  })
+  uniforms.introBlur.value = params.intro.blur
+
   const trailTex = useGridTrailTexture({
+    pointerOverrideRef: introPointer,
     grid: params.cursor.grid,
     radius: params.cursor.radius,
     strength: params.cursor.strength,
@@ -192,6 +273,7 @@ function Sketch() {
     fontWeight: 700,
     letterSpacing: params.text.letterSpacing,
     fontFamily: alteHaas.style.fontFamily,
+    maxLines: Math.round(params.text.maxLines),
   })
 
   const bayerTex = useBayerTexture()
@@ -208,7 +290,8 @@ function Sketch() {
 export default function ShaderTrailExperience() {
   return (
     <>
-      <div className="h-dvh w-screen bg-black">
+      {/* Fills the stage from app/page.tsx rather than the viewport. */}
+      <div className="size-full bg-black">
         <WebGPUScene>
           <Sketch />
         </WebGPUScene>

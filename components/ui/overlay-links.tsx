@@ -26,7 +26,7 @@ export function OverlayLinks() {
     <>
       <a
         aria-label="Bautista Berto experiments, home"
-        className={`fixed top-6 left-6 z-50 ${chip}`}
+        className={`absolute top-4 left-4 z-50 ${chip}`}
         href="https://experiments.bautistaberto.com/"
         rel="noreferrer"
         target="_blank"
@@ -44,7 +44,7 @@ export function OverlayLinks() {
 
       <nav
         aria-label="Social links"
-        className="fixed bottom-6 left-6 z-50 flex gap-2"
+        className="absolute bottom-4 left-4 z-50 flex gap-2"
       >
         {SOCIALS.map(({ href, label, path }) => (
           <a
