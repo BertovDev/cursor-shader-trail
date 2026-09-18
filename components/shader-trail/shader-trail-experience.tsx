@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef } from "react"
 import { WebGPUScene } from "@/components/webgpu/webgpu-scene"
 import { WebGPUSketch } from "@/components/webgpu/webgpu-sketch"
 import { alteHaas } from "@/lib/fonts"
+import { PAPER } from "@/lib/palette"
 import {
   type BrushShape,
   useGridTrailTexture,
@@ -107,7 +108,7 @@ function Sketch() {
     },
     palette: {
       textColor: "#282828",
-      bgColor: "#BCBDB8",
+      bgColor: PAPER,
     },
     letters: {
       // 0 = flat ink, 1 = the full noisy treatment
@@ -290,8 +291,10 @@ function Sketch() {
 export default function ShaderTrailExperience() {
   return (
     <>
-      {/* Fills the stage from app/page.tsx rather than the viewport. */}
-      <div className="size-full bg-black">
+      {/* Fills the stage from app/page.tsx rather than the viewport. Paper,
+          not black: the canvas shows nothing between mount and the WebGPU
+          renderer's first frame, and whatever is behind it is what you see. */}
+      <div className="size-full" style={{ background: PAPER }}>
         <WebGPUScene>
           <Sketch />
         </WebGPUScene>
