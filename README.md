@@ -1,6 +1,10 @@
 # Cursor Shader Trail
 
-<video src="https://raw.githubusercontent.com/BertovDev/cursor-shader-trail/main/article/assets/00-hero.mp4" poster="https://raw.githubusercontent.com/BertovDev/cursor-shader-trail/main/article/assets/00-hero.jpg" width="100%" controls muted loop playsinline></video>
+
+
+https://github.com/user-attachments/assets/0ab4c214-3e89-4fb3-9bbd-cedf921daaba
+
+
 
 <sub>If the player does not load, the same clip is at
 [`article/assets/00-hero.mp4`](article/assets/00-hero.mp4).</sub>
